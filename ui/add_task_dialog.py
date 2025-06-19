@@ -93,13 +93,13 @@ class AddTaskDialog(wx.Dialog):
             if result.get('success') is False:
                 wx.MessageBox(f"加载任务失败: {result.get('msg', '未知错误')}", "错误", wx.OK | wx.ICON_ERROR)
                 return
-            task = result.get('data', {}).get('task')
+            task = result.get('data', {})
             if task:
-                self.prompt_text.SetValue(getattr(task, 'prompt', ''))
-                self.ratio_choice.SetStringSelection(getattr(task, 'ratio', '9:16'))
-                self.model_choice.SetStringSelection(getattr(task, 'model', 'gen3a_turbo'))
-                self.duration_choice.SetStringSelection(str(getattr(task, 'video_duration', '5')))
-                self.nums_choice.SetStringSelection(str(getattr(task, 'video_nums', '1')))
+                self.prompt_text.SetValue(task.get('prompt', ''))
+                self.ratio_choice.SetStringSelection(task.get('ratio', '9:16'))
+                self.model_choice.SetStringSelection(task.get( 'model', 'gen3a_turbo'))
+                self.duration_choice.SetStringSelection(str(task.get('video_duration', '5')))
+                self.nums_choice.SetStringSelection(str(task.get('video_nums', '1')))
 
 
     def on_optimize_prompt(self, event):

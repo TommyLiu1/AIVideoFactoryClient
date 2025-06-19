@@ -5,7 +5,7 @@ import subprocess
 import threading
 
 from api.task_execution_api import get_user_tasks, batch_run_task, batch_cancel_task, batch_delete_tasks, rerun_task, \
-    cancel_task, get_task_detail, delete_task, run_task
+    cancel_task, get_task_detail, delete_task, run_task, update_task
 from api.user_session import UserSession
 from ui.add_task_dialog import AddTaskDialog
 import asyncio
@@ -224,6 +224,12 @@ class MainFrame(wx.Frame):
         # 兼容旧代码，依然保留
         selected_row = self.grid.GetGridCursorRow()
         return self.get_task_id_by_row(selected_row)
+
+    def get_selected_task_status(self):
+        # 兼容旧代码，依然保留
+        selected_row = self.grid.GetGridCursorRow()
+        task_status_str = self.grid.GetCellValue(selected_row, 7)
+        return task_status_str
 
     def on_grid_select_cell(self, event):
         row = event.GetRow()
@@ -444,17 +450,16 @@ class MainFrame(wx.Frame):
         if not task_id:
             wx.MessageBox("请选择要运行的任务。", "提示", wx.OK | wx.ICON_INFORMATION, self)
             return
-        result = get_task_detail(UserSession.get_user_id(), task_id)
-        if result.get('success') is False:
-            wx.MessageBox(f"运行任务失败: {result.get('message', '未知错误')}", "错误", wx.OK | wx.ICON_ERROR, self)
-            return
-        status = result.get('data', {}).get('task_status', '')
-        if status.lower() in ["started", "queued", "finished", "failed"]:
+        status = self.get_selected_task_status()
+        if status.lower() in ["started", "queued", "finished", "failed","排队中", "运行中", "已完成", "失败"]:
             wx.MessageBox("请选择待运行的任务运行", "警告", wx.OK | wx.ICON_WARNING, self)
             return
         result = run_task(UserSession.get_user_id(), task_id)
         if result.get('success') is False:
-            wx.MessageBox(f"运行任务失败: {result.get('message', '未知错误')}", "错误", wx.OK | wx.ICON_ERROR, self)
+            if result.get('msg').find('UnauthorizedError') != -1:
+                wx.MessageBox("runway token过期，请到菜单设置中设置", "错误", wx.OK | wx.ICON_ERROR, self)
+                return
+            wx.MessageBox(f"运行任务失败: {result.get('msg', '未知错误')}", "错误", wx.OK | wx.ICON_ERROR, self)
             return
         wx.MessageBox("任务运行成功。", "提示", wx.OK | wx.ICON_INFORMATION, self)
 
@@ -463,34 +468,17 @@ class MainFrame(wx.Frame):
         if not task_id:
             wx.MessageBox("请选择要编辑的任务", "提示", wx.OK | wx.ICON_INFORMATION, self)
             return
-        result = get_task_detail(UserSession.get_user_id(), task_id)
-        if result.get('success') is False:
-            wx.MessageBox(f"获取任务详情失败: {result.get('message', '未知错误')}", "错误", wx.OK | wx.ICON_ERROR, self)
-            return
-        task = result.get('data', {})
-        status = task.task_status
-        if status.lower() in ["started", "queued" ,"finished","failed"]:
-            wx.MessageBox("待运行的任务才能允许编辑。", "警告", wx.OK | wx.ICON_WARNING, self)
-            return
         # 只传递 task_id，不传递 ORM 对象
         dlg = AddTaskDialog(self, task_id=task_id)
         if dlg.ShowModal() == wx.ID_OK:
             updated_data = dlg.get_task_data()
             if updated_data:
-
                 try:
-                    if task:
-                        task.prompt = updated_data["prompt"]
-                        task.ratio = updated_data["ratio"]
-                        task.model_name = updated_data["model"]
-                        task.duration = updated_data["count"]
-                        task_status = getattr(task, 'task_status', getattr(task, 'status', None))
-                        if task_status in ["已完成", "失败"]:
-                            if hasattr(task, 'task_status'):
-                                task.task_status = "待运行"
-                            elif hasattr(task, 'status'):
-                                task.status = "待运行"
-                        self.refresh_task_list()
+                    result = update_task(UserSession.get_user_id(), task_id, updated_data)
+                    if result.get('success') is False:
+                        wx.MessageBox(f"任务编辑失败: {result.get('message', '未知错误')}", "错误", wx.OK | wx.ICON_ERROR, self)
+                        return
+                    self.refresh_task_list()
                 except Exception as e:
                     wx.MessageBox(f"任务编辑失败: {e}", "数据库错误", wx.OK | wx.ICON_ERROR, self)
 
@@ -506,6 +494,7 @@ class MainFrame(wx.Frame):
             wx.MessageBox(f"删除任务失败: {result.get('message', '未知错误')}", "错误", wx.OK | wx.ICON_ERROR, self)
             return
         wx.MessageBox("任务删除成功。", "提示", wx.OK | wx.ICON_INFORMATION, self)
+        self.refresh_task_list()
 
     def on_view_task(self, event):
         task_id = self.get_selected_task_id()
@@ -612,7 +601,7 @@ class MainFrame(wx.Frame):
         for row in range(self.grid.GetNumberRows()):
             if self.grid.GetCellValue(row, 0) == '1':
                 status = self.grid.GetCellValue(row, 7)
-                if status in ("pending",):
+                if status in ("pending","待运行"):
                     task_id = self.grid.GetCellValue(row, 1)
                     selected_run_task_ids.append(task_id)
         if not selected_run_task_ids:
@@ -632,7 +621,7 @@ class MainFrame(wx.Frame):
         for row in range(self.grid.GetNumberRows()):
             if self.grid.GetCellValue(row, 0) in (True, '1', 1):
                 status = self.grid.GetCellValue(row, 7)
-                if status in ("pending", "failed", "finished"):
+                if status in ("pending", "failed", "finished","待运行", "失败", "已完成"):
                     task_id = self.grid.GetCellValue(row, 1)
                     deletable_task_ids.append(task_id)
         if not deletable_task_ids:
@@ -642,9 +631,9 @@ class MainFrame(wx.Frame):
         if confirm == wx.YES:
             result = batch_delete_tasks(UserSession.get_user_id(), deletable_task_ids)
             if result.get('success') is True:
-                deleted_task_ids = result.get('data').get('task_ids')
-                deleted_task_failed_count = len(deletable_task_ids) - len(deleted_task_ids)
-                wx.MessageBox(f"批量删除任务完成，成功删除了{len(deleted_task_ids)}个任务，失败了{deleted_task_failed_count}个任务", "提示", wx.OK | wx.ICON_INFORMATION, self)
+                deleted_task_success_count = len(result.get('data').get('succeed'))
+                deleted_task_failed_count = len(result.get('data').get('failed'))
+                wx.MessageBox(f"批量删除任务完成，成功删除了{deleted_task_success_count}个任务，失败了{deleted_task_failed_count}个任务", "提示", wx.OK | wx.ICON_INFORMATION, self)
             else:
                 wx.MessageBox(f"批量删除任务失败: {result.get('message', '未知错误')}", "错误", wx.OK | wx.ICON_ERROR, self)
             self.refresh_task_list()
@@ -655,7 +644,7 @@ class MainFrame(wx.Frame):
         for row in range(self.grid.GetNumberRows()):
             if self.grid.GetCellValue(row, 0) in (True, '1', 1):
                 status = self.grid.GetCellValue(row, 7)
-                if status in ("queued",):
+                if status in ("queued","排队中"):
                     task_id = self.grid.GetCellValue(row, 1)
                     cancelable_task_ids.append(task_id)
         if not cancelable_task_ids:

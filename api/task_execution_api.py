@@ -240,7 +240,7 @@ def batch_delete_tasks(user_id: int, task_ids: list):
             "user_id": user_id
         }
         headers = get_signed_header(playload)
-        response = requests.post(
+        response = requests.delete(
             f"{API_BASE_URL}/tasks/batch_delete",
             headers=headers,
             json=playload,
@@ -250,7 +250,9 @@ def batch_delete_tasks(user_id: int, task_ids: list):
         if response.status_code == 200:
             data = response.json()
             if data.get("status") == 200:
-                return {"success": True, "msg": data.get("message", "批量任务删除成功"), "data": data["data"]["task_ids"]}
+                return {"success": True, "msg": data.get("message", "批量任务删除成功"), "data": data["data"]}
+            elif data.get("status") == 207:
+                return {"success": True, "msg": "部分任务删除失败", "data":data["data"]}
             else:
                 return {"success": False, "msg": data.get("message", "批量任务删除失败")}
         else:
