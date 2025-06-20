@@ -121,7 +121,7 @@ def run_task(user_id: int, task_id: str):
         if response.status_code == 200:
             data = response.json()
             if data.get("status") == 200:
-                return {"success": True, "msg": data.get("message", "任务运行成功"), "data": data["data"]["task_id"]}
+                return {"success": True, "msg": data.get("message", "任务运行成功"), "data": data["data"]["job_id"]}
             else:
                 return {"success": False, "msg": data.get("message", "任务运行失败")}
         else:
@@ -149,7 +149,7 @@ def batch_run_task(user_id: int, task_ids: list):
         if response.status_code == 200:
             data = response.json()
             if data.get("status") == 200:
-                return {"success": True, "msg": data.get("message", "批量任务运行成功"), "data": data["data"]["task_ids"]}
+                return {"success": True, "msg": data.get("message", "批量任务运行成功"), "data": data["data"]["job_ids"]}
             else:
                 return {"success": False, "msg": data.get("message", "批量任务运行失败")}
         else:
@@ -301,6 +301,30 @@ def rerun_task(user_id: int, task_id: str):
                 return {"success": True, "msg": data.get("message", "任务重新运行成功"), "data": data["data"]["task_id"]}
             else:
                 return {"success": False, "msg": data.get("message", "任务重新运行失败")}
+        else:
+            return {"success": False, "msg": f"服务器错误: {response.status_code}"}
+    except Exception as e:
+        return {"success": False, "msg": f"请求服务器失败: {e}"}
+
+
+def download_task_artifact(user_id: int, task_id: str):
+    """
+    下载指定任务的artifact
+    """
+    try:
+        headers = get_signed_header("")
+        response = requests.get(
+            f"{API_BASE_URL}/tasks/{task_id}/download",
+            headers=headers,
+            params={"user_id": user_id},
+            timeout=10
+        )
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("status") == 200:
+                return {"success": True, "msg": data.get("message", "获取下载视频成功"), "data": data["data"]}
+            else:
+                return {"success": False, "msg": data.get("message", "获取下载视频失败")}
         else:
             return {"success": False, "msg": f"服务器错误: {response.status_code}"}
     except Exception as e:

@@ -1,11 +1,13 @@
+from urllib.parse import urlparse, unquote
 import wx
 import wx.grid as gridlib
 import os
 import subprocess
 import threading
+import requests
 
 from api.task_execution_api import get_user_tasks, batch_run_task, batch_cancel_task, batch_delete_tasks, rerun_task, \
-    cancel_task, get_task_detail, delete_task, run_task, update_task
+    cancel_task, get_task_detail, delete_task, run_task, update_task, download_task_artifact
 from api.user_session import UserSession
 from ui.add_task_dialog import AddTaskDialog
 import asyncio
@@ -44,6 +46,10 @@ class MainFrame(wx.Frame):
         # Load initial tasks
         self.refresh_task_list(is_show_loading=True)
         self.create_menu_bar()
+        self.check_video_download_timer = wx.Timer(self)
+        # 定时检查视频下载状态
+        self.check_video_download_timer.Start(30000)
+        self.Bind(wx.EVT_TIMER, self.on_timer, self.check_video_download_timer)
 
 
     def on_size(self, event):
@@ -54,6 +60,62 @@ class MainFrame(wx.Frame):
         for idx, ratio in enumerate(col_ratios):
             self.grid.SetColSize(idx, int(total_width * ratio))
         event.Skip()
+
+    def on_timer(self, event):
+        threading.Thread(target=self.check_video_download_status, daemon=True).start()
+
+    def check_video_download_status(self):
+        """检查视频下载状态"""
+        try:
+            tasks = get_user_tasks(UserSession.get_user_id()).get('data', [])
+            for task in tasks:
+                if task.get('task_status') == 'finished':
+                    download_result = download_task_artifact(UserSession.get_user_id(), task.get('task_id'))
+                    if download_result.get('success') is False:
+                        logger.error(f"下载任务 {task.get('task_id')} 的视频失败: {download_result.get('message')}")
+                        continue
+                    artifact = download_result.get('data')
+                    video_save_path = artifact.get('video_save_path')
+                    video_urls = artifact.get('video_urls') or []
+                    finished_txt_file = os.path.join(video_save_path, 'finished.txt')
+                    if not os.path.exists(video_save_path):
+                        os.makedirs(video_save_path)
+                    else:
+                        # 检查是否已经下载完成
+                        if os.path.exists(finished_txt_file):
+                            continue
+                    for video_url in video_urls:
+                        logger.info(f'begin to download video url: {video_url}')
+                        saved_path = self.download_video(video_url, video_save_path, self.get_filename_from_url(video_url))
+                        logger.info(f"视频:{video_url},下载完成: {saved_path}")
+                    with open(finished_txt_file, 'w') as f:
+                        f.write('finished')
+        except Exception as e:
+            logger.error(f"视频下载状态失败: {e}")
+
+    def download_video(self, url, save_dir, filename=None):
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir, exist_ok=True)
+        if not filename:
+            filename = url.split('/')[-1].split('?')[0]
+        save_path = os.path.join(save_dir, filename)
+        try:
+            with requests.get(url, stream=True, timeout=30) as r:
+                r.raise_for_status()
+                with open(save_path, 'wb') as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+            logger.info(f"视频下载成功: {url} -> {save_path}")
+            return save_path
+        except Exception as e:
+            logger.error(f"下载视频失败: {url}, 错误: {e}")
+            return None
+
+    def get_filename_from_url(self, url):
+        path = urlparse(url).path
+        filename = os.path.basename(path)
+        return unquote(filename)
 
     def create_widgets(self):
         main_sizer = wx.BoxSizer(wx.VERTICAL)

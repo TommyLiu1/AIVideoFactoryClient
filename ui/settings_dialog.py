@@ -62,14 +62,14 @@ class SettingsDialog(wx.Dialog):
             user_dict = get_user_settings(UserSession.get_user_id())
             wx.CallAfter(self.on_user_settings_loaded, user_dict.get("data", {}))
 
-        self.loading = wx.BusyInfo("正在加载配置中，请稍候...", parent=self)
-        wx.YieldIfNeeded()
+        # self.loading = wx.BusyInfo("正在加载配置中，请稍候...", parent=self)
+        # wx.YieldIfNeeded()
         threading.Thread(target=fetch, daemon=True).start()
 
     def on_user_settings_loaded(self, user_dict):
-        if hasattr(self, 'loading') and self.loading:
-            del self.loading
-            wx.YieldIfNeeded()
+        # if hasattr(self, 'loading') and self.loading:
+        #     del self.loading
+        #     wx.YieldIfNeeded()
         if user_dict and user_dict.get("token"):
             self.token_ctrl.SetValue(user_dict.get("token") or "")
             self.video_path_ctrl.SetValue(user_dict.get("save_video_path") or "")
@@ -91,14 +91,14 @@ class SettingsDialog(wx.Dialog):
             result = create_or_update_user_settings(UserSession.get_user_id(), user_setting)
             wx.CallAfter(self.on_save_settings_result, result)
             # 显示loading对话框
-            self.loading = wx.BusyInfo("正在提交中，请稍候...", parent=self)
-            wx.YieldIfNeeded()
+            # self.loading = wx.BusyInfo("正在提交中，请稍候...", parent=self)
+            # wx.YieldIfNeeded()
         threading.Thread(target=save, daemon=True).start()
 
     def on_save_settings_result(self, result):
-        if hasattr(self, 'loading') and self.loading:
-            del self.loading
-            wx.YieldIfNeeded()
+        # if hasattr(self, 'loading') and self.loading:
+        #     del self.loading
+        #     wx.YieldIfNeeded()
         if result.get("success") is False:
             wx.MessageBox(f"保存设置失败: {result.get('data', {}).get('message', '')}", "错误", wx.OK | wx.ICON_ERROR)
             return
