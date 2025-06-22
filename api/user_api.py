@@ -35,12 +35,11 @@ def logout():
     用户登出API请求
     :return: dict, 服务器返回的json数据
     """
-    global token
     try:
         response = requests.post(
             f"{API_BASE_URL}/logout",
             json={"user_id": UserSession.get_user_id(), "token": UserSession.get_token()},
-            timeout=5
+            timeout=10
         )
         if response.status_code == 200:
             data = response.json()

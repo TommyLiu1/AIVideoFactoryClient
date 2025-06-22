@@ -8,8 +8,10 @@ import requests
 
 from api.task_execution_api import get_user_tasks, batch_run_task, batch_cancel_task, batch_delete_tasks, rerun_task, \
     cancel_task, get_task_detail, delete_task, run_task, update_task, download_task_artifact
+from api.user_api import logout
 from api.user_session import UserSession
 from ui.add_task_dialog import AddTaskDialog
+from ui.login_frame import LoginFrame
 import asyncio
 # Import SQLAlchemy components and Task model
 from loguru import logger
@@ -50,7 +52,25 @@ class MainFrame(wx.Frame):
         # 定时检查视频下载状态
         self.check_video_download_timer.Start(30000)
         self.Bind(wx.EVT_TIMER, self.on_timer, self.check_video_download_timer)
+        # 记录已完成下载的任务ID
+        self.finished_task_ids = set()
+        self.finished_tasks_file = os.path.join(os.getcwd(), 'finished_tasks.txt')
+        self._load_finished_tasks()
 
+    def _load_finished_tasks(self):
+        """从本地文件加载已完成下载的任务ID"""
+        if os.path.exists(self.finished_tasks_file):
+            with open(self.finished_tasks_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    task_id = line.strip()
+                    if task_id:
+                        self.finished_task_ids.add(task_id)
+
+    def _save_finished_task(self):
+        """将self.finished_task_ids中的所有任务ID写入本地文件（覆盖写入）"""
+        with open(self.finished_tasks_file, 'w', encoding='utf-8') as f:
+            for task_id in self.finished_task_ids:
+                f.write(str(task_id) + '\n')
 
     def on_size(self, event):
         self.Layout()
@@ -69,27 +89,25 @@ class MainFrame(wx.Frame):
         try:
             tasks = get_user_tasks(UserSession.get_user_id()).get('data', [])
             for task in tasks:
+                task_id = task.get('task_id')
+                if task_id in self.finished_task_ids:
+                    logger.info(f"任务 {task_id} 已经完成下载，跳过检查")
+                    continue
                 if task.get('task_status') == 'finished':
                     download_result = download_task_artifact(UserSession.get_user_id(), task.get('task_id'))
                     if download_result.get('success') is False:
-                        logger.error(f"下载任务 {task.get('task_id')} 的视频失败: {download_result.get('message')}")
+                        logger.error(f"下载任务 {task_id} 的视频失败: {download_result.get('message')}")
                         continue
                     artifact = download_result.get('data')
                     video_save_path = artifact.get('video_save_path')
                     video_urls = artifact.get('video_urls') or []
-                    finished_txt_file = os.path.join(video_save_path, 'finished.txt')
-                    if not os.path.exists(video_save_path):
-                        os.makedirs(video_save_path)
-                    else:
-                        # 检查是否已经下载完成
-                        if os.path.exists(finished_txt_file):
-                            continue
                     for video_url in video_urls:
                         logger.info(f'begin to download video url: {video_url}')
                         saved_path = self.download_video(video_url, video_save_path, self.get_filename_from_url(video_url))
                         logger.info(f"视频:{video_url},下载完成: {saved_path}")
-                    with open(finished_txt_file, 'w') as f:
-                        f.write('finished')
+                    # 下载完成后记录任务ID
+                    self.finished_task_ids.add(task_id)
+                    self._save_finished_task()
         except Exception as e:
             logger.error(f"视频下载状态失败: {e}")
 
@@ -386,7 +404,7 @@ class MainFrame(wx.Frame):
         dlg = wx.MessageDialog(self, "确定要退出并返回登录界面吗？", "确认退出", wx.YES_NO | wx.ICON_QUESTION)
         if dlg.ShowModal() == wx.ID_YES:
             self.Hide()
-            from ui.login_frame import LoginFrame
+            threading.Thread(target=logout, daemon=True).start()
             login_frame = LoginFrame(None, title="登录")
             login_frame.Show()
             self.Destroy()
@@ -521,7 +539,7 @@ class MainFrame(wx.Frame):
             if result.get('msg').find('UnauthorizedError') != -1:
                 wx.MessageBox("runway token过期，请到菜单设置中设置", "错误", wx.OK | wx.ICON_ERROR, self)
                 return
-            wx.MessageBox(f"运行任务失败: {result.get('msg', '未知错误')}", "错误", wx.OK | wx.ICON_ERROR, self)
+            wx.MessageBox(f"运行任务失败: {result.get('msg', 'runway返回错误，请稍后重试')}", "错误", wx.OK | wx.ICON_ERROR, self)
             return
         wx.MessageBox("任务运行成功。", "提示", wx.OK | wx.ICON_INFORMATION, self)
 
@@ -538,7 +556,7 @@ class MainFrame(wx.Frame):
                 try:
                     result = update_task(UserSession.get_user_id(), task_id, updated_data)
                     if result.get('success') is False:
-                        wx.MessageBox(f"任务编辑失败: {result.get('message', '未知错误')}", "错误", wx.OK | wx.ICON_ERROR, self)
+                        wx.MessageBox(f"任务编辑失败: {result.get('msg', '服务器内部错误，请稍后重试')}", "错误", wx.OK | wx.ICON_ERROR, self)
                         return
                     self.refresh_task_list()
                 except Exception as e:
@@ -553,7 +571,7 @@ class MainFrame(wx.Frame):
             return
         result = delete_task(UserSession.get_user_id(), task_id)
         if result.get('success') is False:
-            wx.MessageBox(f"删除任务失败: {result.get('message', '未知错误')}", "错误", wx.OK | wx.ICON_ERROR, self)
+            wx.MessageBox(f"删除任务失败: {result.get('msg', '服务器内部错误，请稍后重试')}", "错误", wx.OK | wx.ICON_ERROR, self)
             return
         wx.MessageBox("任务删除成功。", "提示", wx.OK | wx.ICON_INFORMATION, self)
         self.refresh_task_list()
@@ -565,7 +583,7 @@ class MainFrame(wx.Frame):
             return
         result = get_task_detail(UserSession.get_user_id(), task_id)
         if result.get('success') is False:
-            wx.MessageBox(f"获取任务详情失败: {result.get('message', '未知错误')}", "错误", wx.OK | wx.ICON_ERROR, self)
+            wx.MessageBox(f"获取任务详情失败: {result.get('msg', '服务器内部错误，请稍后重试')}", "错误", wx.OK | wx.ICON_ERROR, self)
             return
         task = result.get('data', {})
         details = (f"任务ID: {getattr(task, 'task_id', '')}\n"
@@ -585,11 +603,11 @@ class MainFrame(wx.Frame):
         if not task_id:
             wx.MessageBox("请选择要查看视频的任务。", "提示", wx.OK | wx.ICON_INFORMATION, self)
             return
-        result = get_task_detail(UserSession.get_user_id(), task_id)
+        result = download_task_artifact(UserSession.get_user_id(), task_id)
         if result.get('success') is False:
-            wx.MessageBox(f"获取任务详情失败: {result.get('message', '未知错误')}", "错误", wx.OK | wx.ICON_ERROR, self)
+            wx.MessageBox(f"查看任视频详情失败: {result.get('msg', '视频暂无生成，请稍后重试')}", "错误", wx.OK | wx.ICON_ERROR, self)
             return
-        video_path = result.get('data', {}).get('video_path')
+        video_path = result.get('data', {}).get('save_video_path')
         if not video_path:
             wx.MessageBox("未找到视频文件路径。", "提示", wx.OK | wx.ICON_INFORMATION, self)
             return
@@ -611,7 +629,7 @@ class MainFrame(wx.Frame):
             return
         result = cancel_task(UserSession.get_user_id(), task_id)
         if not result.get('success'):
-            wx.MessageBox(f"取消任务失败: {result.get('message', '未知错误')}", "错误", wx.OK | wx.ICON_ERROR, self)
+            wx.MessageBox(f"取消任务失败: {result.get('msg', 'runway返回错误，请稍后重试')}", "错误", wx.OK | wx.ICON_ERROR, self)
         else:
             wx.MessageBox("任务取消成功。", "提示", wx.OK | wx.ICON_INFORMATION, self)
             # 刷新任务列表
@@ -624,7 +642,7 @@ class MainFrame(wx.Frame):
             return
         result = rerun_task(UserSession.get_user_id(), task_id)
         if not result.get('success'):
-            wx.MessageBox(f"重试任务失败: {result.get('message', '未知错误')}", "错误", wx.OK | wx.ICON_ERROR, self)
+            wx.MessageBox(f"重试任务失败: {result.get('msg', 'runway返回错误，请稍后重试')}", "错误", wx.OK | wx.ICON_ERROR, self)
         else:
             wx.MessageBox("任务重试成功，正在重新运行任务。", "提示", wx.OK | wx.ICON_INFORMATION, self)
             # 刷新任务列表
@@ -671,7 +689,7 @@ class MainFrame(wx.Frame):
             return
         result = batch_run_task(UserSession.get_user_id(), selected_run_task_ids)
         if result.get('success') is False:
-            wx.MessageBox(f"批量运行任务失败: {result.get('message', '未知错误')}", "错误", wx.OK | wx.ICON_ERROR, self)
+            wx.MessageBox(f"批量运行任务失败: {result.get('msg', 'runway返回错误，请稍后重试')}", "错误", wx.OK | wx.ICON_ERROR, self)
             return
         run_success_task_ids = result.get('data').get('task_ids')
         run_task_failed_count = len(selected_run_task_ids) - len(run_success_task_ids)
@@ -697,7 +715,7 @@ class MainFrame(wx.Frame):
                 deleted_task_failed_count = len(result.get('data').get('failed'))
                 wx.MessageBox(f"批量删除任务完成，成功删除了{deleted_task_success_count}个任务，失败了{deleted_task_failed_count}个任务", "提示", wx.OK | wx.ICON_INFORMATION, self)
             else:
-                wx.MessageBox(f"批量删除任务失败: {result.get('message', '未知错误')}", "错误", wx.OK | wx.ICON_ERROR, self)
+                wx.MessageBox(f"批量删除任务失败: {result.get('msg', '服务器内部错误，请稍后重试')}", "错误", wx.OK | wx.ICON_ERROR, self)
             self.refresh_task_list()
 
     def on_batch_cancel(self, event):
@@ -720,7 +738,7 @@ class MainFrame(wx.Frame):
                 canceled_task_failed_count = len(cancelable_task_ids) - len(canceled_task_ids)
                 wx.MessageBox(f"批量取消任务完成，成功取消了{len(canceled_task_ids)}个任务，失败了{canceled_task_failed_count}个任务", "提示", wx.OK | wx.ICON_INFORMATION, self)
             else:
-                wx.MessageBox(f"批量取消任务失败: {result.get('message', '未知错误')}", "错误", wx.OK | wx.ICON_ERROR, self)
+                wx.MessageBox(f"批量取消任务失败: {result.get('msg', '服务器内部错误，请稍后重试')}", "错误", wx.OK | wx.ICON_ERROR, self)
             self.refresh_task_list()
 
     def on_batch_retry(self, event):
@@ -743,7 +761,7 @@ class MainFrame(wx.Frame):
                 retried_task_failed_count = len(retryable_task_ids) - len(retried_task_ids)
                 wx.MessageBox(f"批量重试任务完成，成功了{len(retried_task_ids)}个任务，失败了{retried_task_failed_count}个任务", "提示", wx.OK | wx.ICON_INFORMATION, self)
             else:
-                wx.MessageBox(f"批量重试任务失败: {result.get('message', '未知错误')}", "错误", wx.OK | wx.ICON_ERROR, self)
+                wx.MessageBox(f"批量重试任务失败: {result.get('msg', 'runway返回错误，请稍后重试')}", "错误", wx.OK | wx.ICON_ERROR, self)
 
             self.refresh_task_list()
     def on_refresh_task(self, event):
@@ -759,6 +777,12 @@ class MainFrame(wx.Frame):
             self.page_size = 10  # 默认回退
         self.current_page = 1  # 切换分页时回到第一页
         self.refresh_task_list()
+
+
+
+
+
+
 
 
 

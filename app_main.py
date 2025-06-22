@@ -1,13 +1,15 @@
-
+import threading
 from datetime import datetime
 import wx
 from loguru import logger
+
+from api.user_api import logout
 from ui.login_frame import LoginFrame
 import os
 import sys
 
-if hasattr(sys, '_MEIPASS'):
-    base_path = sys._MEIPASS
+if getattr(sys, 'frozen', False):
+    base_path = os.path.dirname(sys.executable)
 else:
     base_path = os.path.abspath(".")
 log_dir = os.path.join(base_path, "logs")
@@ -33,6 +35,8 @@ class AIVideoGenerateApp(wx.App):
             return False
 
     def OnExit(self):
+        # 在应用退出时执行注销操作
+        threading.Thread(target=logout, daemon=True).start()
         sys.exit(0)
 
 
