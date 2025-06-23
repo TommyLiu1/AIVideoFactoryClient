@@ -5,13 +5,14 @@ import os
 import subprocess
 import threading
 import requests
+import wx.lib.newevent
+# import importlib
 
 from api.task_execution_api import get_user_tasks, batch_run_task, batch_cancel_task, batch_delete_tasks, rerun_task, \
     cancel_task, get_task_detail, delete_task, run_task, update_task, download_task_artifact
 from api.user_api import logout
 from api.user_session import UserSession
 from ui.add_task_dialog import AddTaskDialog
-from ui.login_frame import LoginFrame
 import asyncio
 # Import SQLAlchemy components and Task model
 from loguru import logger
@@ -30,6 +31,9 @@ LIST_ROW_HOVER_BG = wx.Colour(235, 245, 255)  # Light blue on hover (subtle)
 LIST_ROW_SELECTED_BG = wx.Colour(217, 236, 255)  # Slightly darker blue on selection
 
 
+
+# 定义一个自定义事件，用于检测用户是否有操作
+UserInactiveEvent, EVT_USER_INACTIVE = wx.lib.newevent.NewEvent()
 
 class MainFrame(wx.Frame):
     def __init__(self, parent, title):
@@ -56,6 +60,12 @@ class MainFrame(wx.Frame):
         self.finished_task_ids = set()
         self.finished_tasks_file = os.path.join(os.getcwd(), 'finished_tasks.txt')
         self._load_finished_tasks()
+
+        self.inactivity_timer = wx.Timer(self)
+        self.Bind(wx.EVT_TIMER, self.on_inactivity_timer, self.inactivity_timer)
+        self.inactivity_timer.Start(300000)  # 5分钟无操作
+        self.Bind(wx.EVT_MOTION, self.reset_inactivity_timer)
+        self.Bind(wx.EVT_KEY_DOWN, self.reset_inactivity_timer)
 
     def _load_finished_tasks(self):
         """从本地文件加载已完成下载的任务ID"""
@@ -110,6 +120,8 @@ class MainFrame(wx.Frame):
                     self._save_finished_task()
         except Exception as e:
             logger.error(f"视频下载状态失败: {e}")
+        finally:
+            self.refresh_task_list()
 
     def download_video(self, url, save_dir, filename=None):
         if not os.path.exists(save_dir):
@@ -404,7 +416,10 @@ class MainFrame(wx.Frame):
         dlg = wx.MessageDialog(self, "确定要退出并返回登录界面吗？", "确认退出", wx.YES_NO | wx.ICON_QUESTION)
         if dlg.ShowModal() == wx.ID_YES:
             self.Hide()
+            from ui.login_frame import LoginFrame
             threading.Thread(target=logout, daemon=True).start()
+            # login_frame_module = importlib.import_module("ui.login_frame")
+            # LoginFrame = getattr(login_frame_module, "LoginFrame")
             login_frame = LoginFrame(None, title="登录")
             login_frame.Show()
             self.Destroy()
@@ -607,7 +622,7 @@ class MainFrame(wx.Frame):
         if result.get('success') is False:
             wx.MessageBox(f"查看任视频详情失败: {result.get('msg', '视频暂无生成，请稍后重试')}", "错误", wx.OK | wx.ICON_ERROR, self)
             return
-        video_path = result.get('data', {}).get('save_video_path')
+        video_path = result.get('data', {}).get('video_save_path')
         if not video_path:
             wx.MessageBox("未找到视频文件路径。", "提示", wx.OK | wx.ICON_INFORMATION, self)
             return
@@ -778,22 +793,23 @@ class MainFrame(wx.Frame):
         self.current_page = 1  # 切换分页时回到第一页
         self.refresh_task_list()
 
+    def reset_inactivity_timer(self, event):
+        """重置无操作计时器"""
+        self.inactivity_timer.Start(300000)  # 重置为5分钟
+        event.Skip()
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    def on_inactivity_timer(self, event):
+        """处理无操作事件"""
+        dlg = wx.MessageDialog(self, "您已超过5分钟未操作，系统将退出登录。", "超时退出", wx.OK | wx.ICON_WARNING)
+        if dlg.ShowModal() == wx.ID_OK:
+            self.Hide()
+            from ui.login_frame import LoginFrame
+            threading.Thread(target=logout, daemon=True).start()
+            # login_frame_module = importlib.import_module("ui.login_frame")
+            # LoginFrame = getattr(login_frame_module, "LoginFrame")
+            login_frame = LoginFrame(None, title="登录")
+            login_frame.Show()
+            self.Destroy()
+        else:
+            dlg.Destroy()
 

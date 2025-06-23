@@ -1,5 +1,4 @@
 import wx
-
 from ui.main_frame import MainFrame
 from api.user_api import login
 
@@ -91,10 +90,14 @@ class LoginFrame(wx.Frame):
         data = login(username, password)
         if data.get("success"):
             self.Hide()
+            # main_frame_module = importlib.import_module("ui.main_frame")
+            # MainFrame = getattr(main_frame_module, "MainFrame")
             main_frame = MainFrame(None, title="主界面 - 任务管理")
             main_frame.Show()
         else:
             wx.MessageBox(data.get("msg", "用户名或密码错误！"), "登录失败", wx.OK | wx.ICON_ERROR)
             self.username_text.SetValue("")
             self.password_text.SetValue("")
+
+
 
