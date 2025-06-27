@@ -7,7 +7,7 @@ class LoginFrame(wx.Frame):
         super().__init__(parent, title=title, size=wx.Size(640, 480))
         self.panel = wx.Panel(self)
         self.panel.SetBackgroundColour(wx.Colour(30, 30, 30))
-
+        self.Bind(wx.EVT_CLOSE, self.on_close)
         self.create_widgets()
         self.Centre()
 
@@ -98,6 +98,10 @@ class LoginFrame(wx.Frame):
             wx.MessageBox(data.get("msg", "用户名或密码错误！"), "登录失败", wx.OK | wx.ICON_ERROR)
             self.username_text.SetValue("")
             self.password_text.SetValue("")
+
+    def on_close(self, event):
+        self.Destroy()
+        wx.Exit()  # 强制退出主循环，确保进程结束
 
 
 

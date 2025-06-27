@@ -1,6 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 
+block_cipher = None
+
 a = Analysis(
     ['app_main.py'],
     pathex=[],
@@ -36,4 +38,5 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=['app_icon.ico'],
+    version='version.txt'
 )

@@ -44,6 +44,7 @@ class MainFrame(wx.Frame):
         self.Centre()
         self.SetMinSize(wx.Size(850, 600))
         # 绑定Grid右键菜单事件
+        self.Bind(wx.EVT_CLOSE, self.on_close)
         self.Bind(wx.EVT_SIZE, self.on_size)
         self.grid.Bind(gridlib.EVT_GRID_CELL_RIGHT_CLICK, self.on_grid_cell_right_click)
         self.grid.Bind(gridlib.EVT_GRID_SELECT_CELL, self.on_grid_select_cell)
@@ -847,6 +848,11 @@ class MainFrame(wx.Frame):
         login_frame = LoginFrame(None, title="登录")
         login_frame.Show()
         self.Destroy()
+
+    def on_close(self, event):
+        threading.Thread(target=logout, daemon=True).start()
+        self.Destroy()
+        wx.Exit()  # 强制退出主循环，确保进程结束
 
 
 
