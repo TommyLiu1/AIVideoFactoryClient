@@ -47,6 +47,10 @@ class MainFrame(wx.Frame):
         self.Bind(wx.EVT_SIZE, self.on_size)
         self.grid.Bind(gridlib.EVT_GRID_CELL_RIGHT_CLICK, self.on_grid_cell_right_click)
         self.grid.Bind(gridlib.EVT_GRID_SELECT_CELL, self.on_grid_select_cell)
+        self.grid.GetGridWindow().Bind(wx.EVT_MOTION, self.on_grid_mouse_motion)
+        self._tip_window = None
+        self._last_tip_cell = None
+
         # Bind activate event to refresh task list when window is activated
         self.Bind(wx.EVT_ACTIVATE, self.on_activate)
         # Load initial tasks
@@ -63,9 +67,10 @@ class MainFrame(wx.Frame):
 
         self.inactivity_timer = wx.Timer(self)
         self.Bind(wx.EVT_TIMER, self.on_inactivity_timer, self.inactivity_timer)
-        self.inactivity_timer.Start(300000)  # 5分钟无操作
+        self.inactivity_timer.Start(300000 * 6)  # 30分钟无操作
         self.Bind(wx.EVT_MOTION, self.reset_inactivity_timer)
         self.Bind(wx.EVT_KEY_DOWN, self.reset_inactivity_timer)
+
 
     def _load_finished_tasks(self):
         """从本地文件加载已完成下载的任务ID"""
@@ -94,6 +99,24 @@ class MainFrame(wx.Frame):
     def on_timer(self, event):
         threading.Thread(target=self.check_video_download_status, daemon=True).start()
 
+    def on_grid_mouse_motion(self, event):
+        pos = event.GetPosition()
+        coords = self.grid.CalcUnscrolledPosition(pos)
+        row, col = self.grid.XYToCell(*coords)
+        if col == 2 and 0 <= row < self.grid.GetNumberRows():
+            value = self.grid.GetCellValue(row, col)
+            if value and self._last_tip_cell != (row, col):
+                if self._tip_window and self._tip_window.IsShown():
+                    self._tip_window.Destroy()
+                self._tip_window = wx.TipWindow(self.grid, value, maxLength=600)
+                self._last_tip_cell = (row, col)
+        else:
+            if self._tip_window and self._tip_window.IsShown():
+                self._tip_window.Destroy()
+                self._tip_window = None
+                self._last_tip_cell = None
+        event.Skip()
+
     def check_video_download_status(self):
         """检查视频下载状态"""
         try:
@@ -111,9 +134,23 @@ class MainFrame(wx.Frame):
                     artifact = download_result.get('data')
                     video_save_path = artifact.get('video_save_path')
                     video_urls = artifact.get('video_urls') or []
-                    for video_url in video_urls:
+                    video_name = artifact.get('video_name')
+                    for index, video_url in enumerate(video_urls):
                         logger.info(f'begin to download video url: {video_url}')
-                        saved_path = self.download_video(video_url, video_save_path, self.get_filename_from_url(video_url))
+                        saved_path = self.download_video(video_url, video_save_path, f'{video_name}_{index + 1}.mp4')
+                        update_task_data = {
+                            'task_id': task_id,
+                            'prompt': task.get('prompt'),
+                            'model': task.get('model'),
+                            'ratio': task.get('ratio'),
+                            'video_name': video_name,
+                            'seconds': task.get('video_duration'),
+                            'numbers': task.get('video_nums'),
+                            'video_local_path': saved_path
+                        }
+                        result = update_task(UserSession.get_user_id(), task_id, update_task_data)
+                        if result.get('success') is False:
+                            logger.error(f"更新视频下载保存的路径失败: {task_id}")
                         logger.info(f"视频:{video_url},下载完成: {saved_path}")
                     # 下载完成后记录任务ID
                     self.finished_task_ids.add(task_id)
@@ -557,6 +594,7 @@ class MainFrame(wx.Frame):
             wx.MessageBox(f"运行任务失败: {result.get('msg', 'runway返回错误，请稍后重试')}", "错误", wx.OK | wx.ICON_ERROR, self)
             return
         wx.MessageBox("任务运行成功。", "提示", wx.OK | wx.ICON_INFORMATION, self)
+        self.refresh_task_list()
 
     def on_edit_task(self, event):
         task_id = self.get_selected_task_id()
@@ -601,14 +639,13 @@ class MainFrame(wx.Frame):
             wx.MessageBox(f"获取任务详情失败: {result.get('msg', '服务器内部错误，请稍后重试')}", "错误", wx.OK | wx.ICON_ERROR, self)
             return
         task = result.get('data', {})
-        details = (f"任务ID: {getattr(task, 'task_id', '')}\n"
-                   f"Prompt: {getattr(task, 'prompt', '')}\n"
-                   f"比例: {getattr(task, 'ratio', '')}\n"
-                   f"模型名称: {getattr(task, 'model', getattr(task, 'model_name', ''))}\n"
-                   f"时长: {getattr(task, 'duration', getattr(task, 'video_duration', ''))} 秒\n"
-                   f"生成数量: {getattr(task, 'generated_count', getattr(task, 'video_nums', ''))}\n"
-                   f"状态: {getattr(task, 'task_status', getattr(task, 'status', ''))}\n"
-                   f"失败原因: {getattr(task, 'fail_reason', getattr(task, 'error_message', getattr(task, 'status', '')))}")
+        details = (f"任务ID: {task.get('task_id')}\n"
+                   f"Prompt: {task.get('prompt', '')}\n"
+                   f"比例: {task.get('ratio', '')}\n"
+                   f"模型名称: {task.get('model','')}\n"
+                   f"时长: {task.get('video_duration', '')} 秒\n"
+                   f"生成数量: {task.get('video_nums', '')}\n"
+                   f"失败原因: {task.get('failed_reason', '')}")
         dlg = wx.MessageDialog(self, details, "失败任务详情", wx.OK | wx.ICON_INFORMATION)
         dlg.ShowModal()
         dlg.Destroy()
@@ -618,11 +655,11 @@ class MainFrame(wx.Frame):
         if not task_id:
             wx.MessageBox("请选择要查看视频的任务。", "提示", wx.OK | wx.ICON_INFORMATION, self)
             return
-        result = download_task_artifact(UserSession.get_user_id(), task_id)
+        result = get_task_detail(UserSession.get_user_id(), task_id)
         if result.get('success') is False:
             wx.MessageBox(f"查看任视频详情失败: {result.get('msg', '视频暂无生成，请稍后重试')}", "错误", wx.OK | wx.ICON_ERROR, self)
             return
-        video_path = result.get('data', {}).get('video_save_path')
+        video_path = result.get('data', {}).get('video_local_path')
         if not video_path:
             wx.MessageBox("未找到视频文件路径。", "提示", wx.OK | wx.ICON_INFORMATION, self)
             return
@@ -675,6 +712,7 @@ class MainFrame(wx.Frame):
             self.refresh_task_list()
 
     def on_activate(self, event):
+        self.reset_inactivity_timer(event)
         event.Skip()
 
     def on_select_all(self, event):
@@ -795,21 +833,22 @@ class MainFrame(wx.Frame):
 
     def reset_inactivity_timer(self, event):
         """重置无操作计时器"""
-        self.inactivity_timer.Start(300000)  # 重置为5分钟
+        self.inactivity_timer.Start(300000 * 6)  # 重置为30分钟
         event.Skip()
 
     def on_inactivity_timer(self, event):
         """处理无操作事件"""
-        dlg = wx.MessageDialog(self, "您已超过5分钟未操作，系统将退出登录。", "超时退出", wx.OK | wx.ICON_WARNING)
-        if dlg.ShowModal() == wx.ID_OK:
-            self.Hide()
-            from ui.login_frame import LoginFrame
-            threading.Thread(target=logout, daemon=True).start()
-            # login_frame_module = importlib.import_module("ui.login_frame")
-            # LoginFrame = getattr(login_frame_module, "LoginFrame")
-            login_frame = LoginFrame(None, title="登录")
-            login_frame.Show()
-            self.Destroy()
-        else:
-            dlg.Destroy()
+        self.inactivity_timer.Stop()
+        self.Hide()
+        from ui.login_frame import LoginFrame
+        threading.Thread(target=logout, daemon=True).start()
+        # login_frame_module = importlib.import_module("ui.login_frame")
+        # LoginFrame = getattr(login_frame_module, "LoginFrame")
+        login_frame = LoginFrame(None, title="登录")
+        login_frame.Show()
+        self.Destroy()
+
+
+
+
 

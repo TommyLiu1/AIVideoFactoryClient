@@ -37,7 +37,13 @@ class AddTaskDialog(wx.Dialog):
         optimize_btn.SetBackgroundColour(wx.Colour("#007ACC"))  # 蓝色
         optimize_btn.SetForegroundColour(wx.Colour("#FFFFFF"))  # 白色
         grid_sizer.Add(optimize_btn, pos=(1, 2), flag=wx.ALIGN_RIGHT  | wx.ALL, border=5)
-
+        # File Name
+        file_name_label = wx.StaticText(self.panel, label="文件命名:")
+        file_name_label.SetForegroundColour(wx.Colour("#000000"))
+        grid_sizer.Add(file_name_label, pos=(1, 0), flag=wx.ALIGN_CENTER_VERTICAL | wx.ALL, border=5)
+        self.file_name_text = wx.TextCtrl(self.panel, size=wx.Size(200, -1))
+        self.file_name_text.SetBackgroundColour(wx.Colour("#F7F7F7"))
+        grid_sizer.Add(self.file_name_text, pos=(1, 1), flag=wx.EXPAND | wx.ALL, border=5)
         # Ratio
         ratio_label = wx.StaticText(self.panel, label="Ratio:")
         grid_sizer.Add(ratio_label, pos=(2, 0), flag=wx.ALIGN_CENTER_VERTICAL | wx.ALL, border=5)
@@ -99,6 +105,7 @@ class AddTaskDialog(wx.Dialog):
                 self.ratio_choice.SetStringSelection(task.get('ratio', '9:16'))
                 self.model_choice.SetStringSelection(task.get( 'model', 'gen3a_turbo'))
                 self.duration_choice.SetStringSelection(str(task.get('video_duration', '5')))
+                self.file_name_text.SetValue(task.get('video_name',''))
                 self.nums_choice.SetStringSelection(str(task.get('video_nums', '1')))
 
 
@@ -130,7 +137,14 @@ class AddTaskDialog(wx.Dialog):
         model = self.model_choice.GetStringSelection()
         duration = int(self.duration_choice.GetStringSelection())
         video_nums = int(self.nums_choice.GetStringSelection())
+        video_name = self.file_name_text.GetValue()
         run_after_add = self.run_checkbox.GetValue()
+        if not prompt.strip():
+            wx.MessageBox('提示词不能为空，请输入提示词', '提示', wx.OK | wx.ICON_INFORMATION)
+            return
+        if not video_name.strip():
+            wx.MessageBox('文件名不能为空，请输入文件名', '提示', wx.OK | wx.ICON_INFORMATION)
+            return
         self.loading = wx.BusyInfo("正在处理中，请稍候...", parent=self)
         wx.YieldIfNeeded()
         def do_request():
@@ -141,6 +155,7 @@ class AddTaskDialog(wx.Dialog):
                     'prompt': prompt,
                     'model': model,
                     'ratio': ratio,
+                    'video_name':video_name,
                     'seconds': duration,
                     'numbers': video_nums
                 }
@@ -160,6 +175,7 @@ class AddTaskDialog(wx.Dialog):
                     'model': model,
                     'ratio': ratio,
                     'seconds': duration,
+                    'video_name':video_name,
                     'numbers': video_nums
                 }
                 result = create_task(UserSession.get_user_id(), create_task_data)
