@@ -16,6 +16,7 @@ from ui.add_task_dialog import AddTaskDialog
 import asyncio
 # Import SQLAlchemy components and Task model
 from loguru import logger
+from ui.components.conversation_modal import ConversationModal
 # --- Custom Styling Colors (Element UI inspired) ---
 ELEM_PRIMARY = wx.Colour(64, 158, 255)  # Element UI default blue
 ELEM_SUCCESS = wx.Colour(103, 194, 58)  # Green
@@ -425,11 +426,15 @@ class MainFrame(wx.Frame):
         # 使用带有快捷键的label格式："菜单项名称\tCtrl+N"
         new_task_item = file_menu.Append(wx.ID_NEW, "新建任务\tCtrl+N")
         file_menu.AppendSeparator()
+        # 新建会话
+        new_session_item = file_menu.Append(wx.ID_ANY, "新建会话\tCtrl+M")
+        file_menu.AppendSeparator()
         settings_item = file_menu.Append(wx.ID_PREFERENCES, "设置\tCtrl+S")
         file_menu.AppendSeparator()
         exit_item = file_menu.Append(wx.ID_EXIT, "退出\tCtrl+Q")
         menu_bar.Append(file_menu, "菜单(&M)")
         self.Bind(wx.EVT_MENU, self.on_new_task, new_task_item)
+        self.Bind(wx.EVT_MENU, self.on_new_session, new_session_item)  # 新建会话事件
         self.Bind(wx.EVT_MENU, self.on_settings, settings_item)
         self.Bind(wx.EVT_MENU, self.on_exit, exit_item)
         self.SetMenuBar(menu_bar)
@@ -439,6 +444,7 @@ class MainFrame(wx.Frame):
         # 额外手动绑定加速键（防止部分平台不生效）
         accel_tbl = wx.AcceleratorTable([
             (wx.ACCEL_CTRL, ord('N'), new_task_item.GetId()),
+            (wx.ACCEL_CTRL, ord('M'), new_session_item.GetId()),
             (wx.ACCEL_CTRL, ord('S'), settings_item.GetId()),
             (wx.ACCEL_CTRL, ord('Q'), exit_item.GetId()),
         ])
@@ -449,6 +455,24 @@ class MainFrame(wx.Frame):
         dlg = SettingsDialog(self)
         dlg.ShowModal()
         dlg.Destroy()
+
+    def on_new_session(self, event):
+        # 创建并显示对话窗体
+        dlg = ConversationModal(self)
+        if dlg.ShowModal() == wx.ID_CANCEL:
+            # 用户关闭窗体时弹出确认对话框
+            confirm_dlg = wx.MessageDialog(
+                self,
+                "关闭窗体之前的对话消息将会被清空，确定要关闭吗？",
+                "确认关闭",
+                wx.YES_NO | wx.ICON_WARNING
+            )
+            if confirm_dlg.ShowModal() == wx.ID_YES:
+                dlg.Destroy()
+            else:
+                dlg.ShowModal()  # 如果用户选择否，重新显示对话窗体
+        else:
+            dlg.Destroy()
 
     def on_exit(self, event):
         dlg = wx.MessageDialog(self, "确定要退出并返回登录界面吗？", "确认退出", wx.YES_NO | wx.ICON_QUESTION)
@@ -853,6 +877,7 @@ class MainFrame(wx.Frame):
         threading.Thread(target=logout, daemon=True).start()
         self.Destroy()
         wx.Exit()  # 强制退出主循环，确保进程结束
+
 
 
 
