@@ -39,6 +39,7 @@ UserInactiveEvent, EVT_USER_INACTIVE = wx.lib.newevent.NewEvent()
 class MainFrame(wx.Frame):
     def __init__(self, parent, title):
         super().__init__(parent, title=title, size=wx.Size(1280, 700))  # 修正Size类型
+        self.is_conversation_processing = False
         self.panel = wx.Panel(self)
         self.panel.SetBackgroundColour(wx.WHITE)
         self.create_widgets()
@@ -99,6 +100,9 @@ class MainFrame(wx.Frame):
         event.Skip()
 
     def on_timer(self, event):
+        if self.is_conversation_processing:
+            logger.info("正在处理对话，跳过定时检查")
+            return
         threading.Thread(target=self.check_video_download_status, daemon=True).start()
 
     def on_grid_mouse_motion(self, event):
@@ -190,6 +194,13 @@ class MainFrame(wx.Frame):
         main_sizer = wx.BoxSizer(wx.VERTICAL)
         top_button_sizer = wx.BoxSizer(wx.HORIZONTAL)
         BTN_HEIGHT = 40
+
+        # Add '新增对话' button
+        add_session_button = wx.Button(self.panel, label="新增对话", size=wx.Size(-1, BTN_HEIGHT))
+        add_session_button.SetBackgroundColour(wx.LIGHT_GREY)  # 深灰色背景
+        add_session_button.SetForegroundColour(wx.WHITE)
+        add_session_button.Bind(wx.EVT_BUTTON, self.on_new_session)
+        top_button_sizer.Add(add_session_button, 0, wx.ALL, 5)
 
         # Add '新增任务' button
         add_task_button = wx.Button(self.panel, label="新增任务", size=wx.Size(-1, BTN_HEIGHT))
@@ -459,6 +470,7 @@ class MainFrame(wx.Frame):
     def on_new_session(self, event):
         # 创建并显示对话窗体
         dlg = ConversationModal(self)
+        self.is_conversation_processing = True
         if dlg.ShowModal() == wx.ID_CANCEL:
             # 用户关闭窗体时弹出确认对话框
             confirm_dlg = wx.MessageDialog(
@@ -468,10 +480,12 @@ class MainFrame(wx.Frame):
                 wx.YES_NO | wx.ICON_WARNING
             )
             if confirm_dlg.ShowModal() == wx.ID_YES:
+                self.is_conversation_processing = False
                 dlg.Destroy()
             else:
                 dlg.ShowModal()  # 如果用户选择否，重新显示对话窗体
         else:
+            self.is_conversation_processing = False
             dlg.Destroy()
 
     def on_exit(self, event):

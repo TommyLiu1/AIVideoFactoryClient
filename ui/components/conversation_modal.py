@@ -1,10 +1,11 @@
-import threading
 import uuid
 from threading import Thread
-
 import wx
+import wx.html2
+import markdown
 import wx.lib.scrolledpanel as scrolled
 from api.text_optimize_api import send_message
+from ui.components.markdown_static_text import MarkdownStaticText
 
 
 class LoadingPanel(wx.Panel):
@@ -50,33 +51,122 @@ class RoundedMessagePanel(wx.Panel):
         self.is_user = is_user
         self.bg_color = bg_color
         self.text_color = text_color
+
+        # 主滚动面板
+        self.scroll_panel = wx.ScrolledWindow(self, style=wx.VSCROLL)
+        self.scroll_panel.SetScrollRate(0, 10)
+        self.scroll_panel.SetBackgroundColour(bg_color)
+
+        # 文本控件
+        self.text_ctrl = MarkdownStaticText(self.scroll_panel, label=text, style=wx.ALIGN_LEFT)
+        self.text_ctrl.SetForegroundColour(text_color)
+        self.text_ctrl.SetFont(wx.Font(12, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL))
+
+        # self.webview = wx.html2.WebView.New(self)
+        # self.webview.SetBackgroundColour(bg_color)
+        # 转换Markdown为HTML
+        # self.load_markdown(text)
+
+        # 计算文本尺寸
+        dc = wx.ClientDC(self.text_ctrl)
+        dc.SetFont(self.text_ctrl.GetFont())
+        text_width, text_height = dc.GetMultiLineTextExtent(text)
+
+        # 设置气泡尺寸
+        bubble_width = min(508, text_width + 40)  # 最大宽度380px
+        self.text_ctrl.Wrap(bubble_width - 20)  # 换行宽度
+
+        # 重新计算换行后的高度
+        _, wrapped_height = dc.GetMultiLineTextExtent(self.text_ctrl.GetLabel())
+        max_height = min(400, wrapped_height + 20)  # 最大高度400px
+
+        # 设置滚动区域
+        self.scroll_panel.SetVirtualSize(wx.Size(bubble_width, wrapped_height + 20))
+        self.scroll_panel.SetMinSize(wx.Size(bubble_width, max_height))
+
+        # 布局
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        # sizer.Add(self.webview, 0, wx.ALL, 10)
+        sizer.Add(self.text_ctrl, 0, wx.ALL, 10)
+        self.scroll_panel.SetSizer(sizer)
+
+        # 主面板布局
+        main_sizer = wx.BoxSizer(wx.VERTICAL)
+        main_sizer.Add(self.scroll_panel, 1, wx.EXPAND)
+        self.SetSizer(main_sizer)
+
+        # 绑定绘制事件
+        # self.webview.Bind(wx.EVT_CONTEXT_MENU, self.on_context_menu)
+        self.text_ctrl.Bind(wx.EVT_CONTEXT_MENU, self.on_context_menu)
         self.Bind(wx.EVT_PAINT, self.on_paint)
         self.Bind(wx.EVT_SIZE, self.on_size)
 
-        # 添加文本控件（支持自动换行和居中）
-        self.text_ctrl = wx.StaticText(self, label=text, style=wx.ALIGN_CENTER, pos=(16,10))
-        self.text_ctrl.SetForegroundColour(text_color)
-        self.text_ctrl.SetFont(wx.Font(12, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL))
-        self.text_ctrl.SetBackgroundColour(self.bg_color)
+    def load_markdown(self, markdown_text):
+        """加载Markdown内容并转换为HTML"""
+        html = markdown.markdown(markdown_text)
 
-        # 计算文本的最佳宽度（限制最大宽度为 350px）
-        dc = wx.ClientDC(self)
-        dc.SetFont(self.text_ctrl.GetFont())
-        text_width, _ = dc.GetTextExtent(text)
-        bubble_width = min(text_width + 40, 350)  # 40px 为左右内边距
+        # 添加样式保持气泡外观
+        styled_html = f"""
+           <html>
+               <style>
+                   body {{
+                       margin: 8px;
+                       padding: 0;
+                       background-color: {self.bg_color.GetAsString(wx.C2S_HTML_SYNTAX)};
+                       color: {self.text_color.GetAsString(wx.C2S_HTML_SYNTAX)};
+                       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                       font-size: 14px;
+                       line-height: 1.5;
+                   }}
+                   pre {{
+                       background-color: rgba(0,0,0,0.05);
+                       padding: 10px;
+                       border-radius: 4px;
+                       overflow-x: auto;
+                   }}
+                   code {{
+                       font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
+                       font-size: 90%;
+                   }}
+                   a {{
+                       color: {self.text_color.GetAsString(wx.C2S_HTML_SYNTAX)};
+                       text-decoration: underline;
+                   }}
+                   blockquote {{
+                       border-left: 3px solid #ccc;
+                       margin: 0;
+                       padding-left: 15px;
+                       color: #666;
+                   }}
+               </style>
+               <body>{html}</body>
+           </html>
+           """
 
-        # 设置文本控件的换行宽度
-        self.text_ctrl.Wrap(bubble_width - 20)  # 20px 为安全边距
+        self.webview.SetPage(styled_html, "")
 
-        # 主布局（垂直居中）
-        sizer = wx.BoxSizer(wx.VERTICAL)
-        sizer.Add(self.text_ctrl, 1, wx.ALIGN_CENTER | wx.ALL, 10)
-        self.SetSizer(sizer)
+    def on_context_menu(self, event):
+        """右键菜单事件"""
+        menu = wx.Menu()
 
-        # 设置面板初始大小
-        self.SetMinSize(wx.Size(bubble_width, -1))  # 高度自适应
+        # 添加复制菜单项
+        copy_item = menu.Append(wx.ID_COPY, "复制文本")
+        self.Bind(wx.EVT_MENU, self.on_copy, copy_item)
+        # 显示菜单
+        self.PopupMenu(menu)
+        menu.Destroy()
+
+    def on_copy(self, event):
+        """复制文本到剪贴板"""
+        if wx.TheClipboard.Open():
+            wx.TheClipboard.SetData(wx.TextDataObject(self.text))
+            wx.TheClipboard.Close()
+            # 显示短暂提示
+            wx.MessageBox("文本已复制到剪贴板", "提示", wx.OK | wx.ICON_INFORMATION, self)
+
 
     def on_paint(self, event):
+        """绘制圆角气泡和箭头"""
         dc = wx.PaintDC(self)
         dc.SetBrush(wx.Brush(self.bg_color))
         dc.SetPen(wx.Pen(self.bg_color))
@@ -87,7 +177,7 @@ class RoundedMessagePanel(wx.Panel):
         # 绘制圆角矩形
         dc.DrawRoundedRectangle(0, 0, width, height, radius)
 
-        # 绘制小三角（用户消息在右侧，助手消息在左侧）
+        # 绘制箭头
         if self.is_user:
             points = [
                 wx.Point(width, height // 2 - 8),
@@ -104,7 +194,7 @@ class RoundedMessagePanel(wx.Panel):
 
     def on_size(self, event):
         self.Refresh()
-
+        event.Skip()
 
 class ConversationModal(wx.Dialog):
     def __init__(self, parent):
@@ -181,7 +271,8 @@ class ConversationModal(wx.Dialog):
         self._is_sending = False
         self.send_btn.Enable()  # 重新启用发送按钮
         # 3. 滚动到底部
-        self.msg_panel.Scroll(-1, self.msg_panel.GetScrollRange(wx.VERTICAL))
+        wx.CallLater(200, self.scroll_to_bottom)
+
 
     def add_loading_message(self):
         """添加Loading占位符"""
@@ -235,3 +326,15 @@ class ConversationModal(wx.Dialog):
         self.msg_panel.Layout()
         self.msg_panel.SetupScrolling()
         self.msg_panel.ScrollChildIntoView(msg_container)
+
+    def scroll_to_bottom(self):
+        """最可靠的滚动到底部实现"""
+        total_height = sum([c.GetSize().height for c in self.msg_panel.GetChildren()])
+
+        # 设置虚拟大小（比实际内容稍大以确保可以滚动）
+        self.msg_panel.SetVirtualSize(wx.Size(self.msg_panel.GetSize().width, total_height + 20))
+
+        # 滚动到底部
+        scroll_pos = self.msg_panel.GetScrollRange(wx.VERTICAL)
+        self.msg_panel.Scroll(-1, scroll_pos)
+        self.msg_panel.Refresh()
